@@ -4,7 +4,7 @@
 
 将 Claude Max 订阅（$200/月）包装成 OpenAI 兼容的本地 HTTP API，供 Continue.dev、各类 AI 客户端等任意支持 OpenAI 格式的工具使用，无需额外支付按量计费费用。
 
-**核心绕过点**：Anthropic 禁止 OAuth Token 直接用于第三方 API 客户端，但 Claude Code CLI 本身可以使用 OAuth Token。本项目以 CLI 子进程为桥梁，对外暴露标准 API。
+**实现原理**：Claude Code CLI 支持通过 OAuth Token 在本地调用模型能力。本项目以 CLI 子进程为桥梁，将其输出适配为标准 OpenAI 格式，对外暴露本地 HTTP API。
 
 ---
 
