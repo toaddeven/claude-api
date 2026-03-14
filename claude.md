@@ -1,10 +1,10 @@
-# claude-api 工程总结
+# llm_api_from_cli 工程总结
 
 ## 项目定位
 
-将 Claude Max 订阅（$200/月）包装成 OpenAI 兼容的本地 HTTP API，供 Continue.dev、各类 AI 客户端等任意支持 OpenAI 格式的工具使用，无需额外支付按量计费费用。
+将 LLM Max 订阅（$200/月）包装成 OpenAI 兼容的本地 HTTP API，供 Continue.dev、各类 AI 客户端等任意支持 OpenAI 格式的工具使用，无需额外支付按量计费费用。
 
-**实现原理**：Claude Code CLI 支持通过 OAuth Token 在本地调用模型能力。本项目以 CLI 子进程为桥梁，将其输出适配为标准 OpenAI 格式，对外暴露本地 HTTP API。
+**实现原理**：LLM CLI 工具支持通过 OAuth Token 在本地调用模型能力。本项目以 CLI 子进程为桥梁，将其输出适配为标准 OpenAI 格式，对外暴露本地 HTTP API。
 
 ---
 
@@ -19,12 +19,12 @@
         │
         │ openai-to-cli 适配
         ▼
-  ClaudeSubprocess
-  spawn("claude --print --output-format stream-json ...")
+  LLM CLI Subprocess
+  spawn("llm-cli --print --output-format stream-json ...")
         │
         │ OAuth Token (macOS Keychain)
         ▼
-  Anthropic API
+  LLM API
         │
         │ JSON 流 → cli-to-openai 适配
         ▼
@@ -45,9 +45,9 @@ src/
 │   ├── openai-to-cli.ts      # OpenAI messages[] → 单条 prompt 字符串 + 模型别名
 │   └── cli-to-openai.ts      # CLI 输出 → OpenAI chat.completion / chunk 格式
 ├── subprocess/
-│   └── manager.ts            # ClaudeSubprocess 类：spawn、超时、JSON 行解析、事件发射
+│   └── manager.ts            # LLMSubprocess 类：spawn、超时、JSON 行解析、事件发射
 ├── session/
-│   └── manager.ts            # 会话 ID 映射，持久化到 ~/.claude-api-sessions.json，24h TTL
+│   └── manager.ts            # 会话 ID 映射，持久化到 ~/.llm-api-sessions.json，24h TTL
 └── server/
     ├── index.ts              # Express 应用创建、startServer / stopServer
     ├── routes.ts             # 路由处理：流式（SSE）+ 非流式，/v1/models，/health
@@ -63,7 +63,7 @@ src/
 实际调用的 CLI 命令：
 
 ```bash
-claude \
+llm-cli \
   --print \                         # 非交互模式，执行完退出
   --output-format stream-json \     # 输出换行分隔的 JSON
   --verbose \                       # stream-json 必须配合 --verbose
@@ -82,7 +82,7 @@ CLI 的每行输出是一个 JSON 对象，类型字段区分：
 | `assistant` | 完整 assistant 消息 |
 | `result` | 最终结果，含 token 用量和费用 |
 
-`ClaudeSubprocess` 继承 `EventEmitter`，解析 buffer 后按类型发射对应事件（`content_delta` / `assistant` / `result`），路由层订阅这些事件组装响应。
+`LLMSubprocess` 继承 `EventEmitter`，解析 buffer 后按类型发射对应事件（`content_delta` / `assistant` / `result`），路由层订阅这些事件组装响应。
 
 **安全设计**：使用 `spawn()` 而非 `exec()`，prompt 作为参数数组元素传递，彻底防止 shell 注入。
 
@@ -102,13 +102,12 @@ OpenAI 的多轮 `messages[]` 被格式化成单条字符串：
 {最新 user 消息}
 ```
 
-模型映射表：`claude-opus-4` → `opus`，`claude-sonnet-4` → `sonnet`，`claude-haiku-4` → `haiku`，未识别时默认 `opus`。
+模型映射表：`opus` → `opus`，`sonnet` → `sonnet`，`haiku` → `haiku`，未识别时默认 `opus`。
 
 ### 3. adapter/cli-to-openai.ts — 响应适配
 
 - **流式**：每个 `content_block_delta` 事件的 `delta.text` 封装成 `chat.completion.chunk`，通过 SSE 发送，最后写 `data: [DONE]`
 - **非流式**：等待 `result` 事件，将 `result.result`（纯文本）和 `usage` 封装成 `chat.completion` 对象
-- 模型名归一化：`claude-sonnet-4-5-20250929` → `claude-sonnet-4`
 
 ### 4. server/routes.ts — 路由层
 
@@ -118,7 +117,7 @@ OpenAI 的多轮 `messages[]` 被格式化成单条字符串：
 
 ### 5. session/manager.ts — 会话管理
 
-利用 OpenAI 请求中的 `user` 字段作为客户端会话标识，映射到 Claude CLI 的 `--session-id`，使得同一客户端的多次请求可以保持对话上下文。会话数据序列化为 JSON 存储在 `~/.claude-api-sessions.json`，超过 24 小时未使用自动清理。
+利用 OpenAI 请求中的 `user` 字段作为客户端会话标识，映射到 CLI 的 `--session-id`，使得同一客户端的多次请求可以保持对话上下文。会话数据序列化为 JSON 存储在 `~/.llm-api-sessions.json`，超过 24 小时未使用自动清理。
 
 ---
 
@@ -135,12 +134,7 @@ OpenAI 的多轮 `messages[]` 被格式化成单条字符串：
 ## 快速上手
 
 ```bash
-# 前置：已安装并登录 Claude Code CLI
-npm install -g @anthropic-ai/claude-code
-claude auth login
-
-# 构建并启动
-cd ~/work/claude-api
+cd ~/work/llm_api_from_cli
 npm install
 npm run build
 npm start          # 默认 3456 端口
@@ -149,39 +143,12 @@ npm start 8080     # 自定义端口
 # 测试
 curl -X POST http://localhost:3456/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-sonnet-4","messages":[{"role":"user","content":"你好"}]}'
+  -d '{"model":"sonnet","messages":[{"role":"user","content":"你好"}]}'
 
 # 流式测试
 curl -N -X POST http://localhost:3456/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"claude-opus-4","messages":[{"role":"user","content":"你好"}],"stream":true}'
-```
-
-### 接入 Continue.dev
-
-```json
-{
-  "models": [{
-    "title": "Claude (Max)",
-    "provider": "openai",
-    "model": "claude-opus-4",
-    "apiBase": "http://localhost:3456/v1",
-    "apiKey": "not-needed"
-  }]
-}
-```
-
-### 接入 Python openai SDK
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:3456/v1", api_key="x")
-resp = client.chat.completions.create(
-    model="claude-sonnet-4",
-    messages=[{"role": "user", "content": "你好"}]
-)
-print(resp.choices[0].message.content)
+  -d '{"model":"opus","messages":[{"role":"user","content":"你好"}],"stream":true}'
 ```
 
 ---
@@ -205,4 +172,4 @@ npm run clean    # 删除 dist/
 | `typescript` | 编译（devDependency） |
 | `@types/*` | 类型声明（devDependency） |
 
-运行时唯一外部依赖是系统 PATH 中的 `claude` CLI。
+运行时唯一外部依赖是系统 PATH 中的 LLM CLI 工具。
